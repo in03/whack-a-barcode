@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whack-a-Barcode</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+    <div class="game-container">
+        <div class="menu-screen" id="menuScreen">
+            <h1>Whack-a-Barcode</h1>
+            <button id="startGame">Start Game</button>
+            <div class="settings">
+                <label for="gameLength">Game Length (seconds):</label>
+                <input type="number" id="gameLength" value="120" min="30" max="300">
+            </div>
+            <div class="high-scores">
+                <h2>High Scores</h2>
+                <ul id="highScoresList"></ul>
+            </div>
+        </div>
+
+        <div class="game-screen hidden" id="gameScreen">
+            <div class="game-stats">
+                <div class="score">Score: <span id="scoreValue">0</span></div>
+                <div class="timer">Time: <span id="timerValue">120</span>s</div>
+                <div class="round">Round: <span id="roundValue">1</span></div>
+            </div>
+            
+            <div class="game-area" id="gameArea">
+                <!-- Barcodes will be dynamically added here -->
+            </div>
+
+            <div id="reader"></div>
+        </div>
+
+        <div class="round-stats hidden" id="roundStats">
+            <h2>Round Statistics</h2>
+            <div class="stats-content">
+                <p>Accuracy: <span id="accuracyValue">0</span>%</p>
+                <p>Good Whacks: <span id="goodWhacks">0</span></p>
+                <p>Bad Whacks: <span id="badWhacks">0</span></p>
+                <p class="stats-message" id="statsMessage"></p>
+            </div>
+            <button id="nextRound">Next Round</button>
+        </div>
+
+        <div class="game-over hidden" id="gameOver">
+            <h2>Game Over!</h2>
+            <div class="final-score">Score: <span id="finalScore">0</span></div>
+            <div class="name-input">
+                <label for="playerName">Enter your name:</label>
+                <input type="text" id="playerName" maxlength="20">
+                <button id="saveScore">Save Score</button>
+            </div>
+            <button id="playAgain">Play Again</button>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html> 
