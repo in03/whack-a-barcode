@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Whack-a-Barcode</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
     <div class="game-container">
         <div class="menu-screen" id="menuScreen">
             <h1>Whack-a-Barcode</h1>
+            <p class="instructions">Use your USB barcode scanner to scan the codes before they disappear!</p>
             <button id="startGame">Start Game</button>
             <div class="settings">
                 <label for="gameLength">Game Length (seconds):</label>
@@ -32,8 +32,6 @@
             <div class="game-area" id="gameArea">
                 <!-- Barcodes will be dynamically added here -->
             </div>
-
-            <div id="reader"></div>
         </div>
 
         <div class="round-stats hidden" id="roundStats">

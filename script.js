@@ -36,38 +36,16 @@ class Game {
     }
 
     setupScanner() {
-        this.scanner = new Html5Qrcode("reader");
-        const config = {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-            formatsToSupport: [
-                Html5QrcodeScanType.SCAN_TYPE_BARCODE_WITH_SS,  // Support keyboard-like scanners
-                Html5QrcodeScanType.SCAN_TYPE_CODE_128,
-                Html5QrcodeScanType.SCAN_TYPE_CODE_39,
-                Html5QrcodeScanType.SCAN_TYPE_EAN_13,
-                Html5QrcodeScanType.SCAN_TYPE_QR_CODE
-            ]
-        };
-
-        // Add keyboard event listener for USB scanners
+        // Remove camera scanner, only use keyboard input for USB scanner
         document.addEventListener('keypress', (e) => {
+            console.log('Key pressed:', e.key, 'Current barcode buffer:', this.currentBarcode);
             if (e.key === 'Enter' && this.currentBarcode) {
+                console.log('Processing complete barcode:', this.currentBarcode);
                 this.onScan(this.currentBarcode);
                 this.currentBarcode = '';
             } else {
                 this.currentBarcode = (this.currentBarcode || '') + e.key;
             }
-        });
-
-        // Start the camera scanner as well
-        this.scanner.start(
-            { facingMode: "environment" },
-            config,
-            this.onScan.bind(this)
-        ).catch(err => {
-            console.log('Camera scanner failed to start, falling back to keyboard mode:', err);
-            // Continue with keyboard mode only
         });
     }
 
@@ -88,6 +66,12 @@ class Game {
 
     spawnBarcode() {
         const gameArea = document.getElementById('gameArea');
+        
+        // Don't spawn if we already have too many barcodes
+        if (gameArea.getElementsByClassName('barcode').length >= 8) {
+            return;
+        }
+
         const barcode = document.createElement('div');
         barcode.className = 'barcode';
         
@@ -105,31 +89,31 @@ class Game {
         barcode.style.left = position.left + 'px';
         barcode.style.top = position.top + 'px';
 
-        // Create QR code or barcode
-        const isQR = Math.random() < 0.3;
-        // Use simpler values that are easier to scan
-        const value = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
+        // Create a simple 4-digit number for easier scanning
+        const value = Math.floor(Math.random() * 9000 + 1000).toString(); // 4-digit number between 1000-9999
         
-        if (isQR) {
-            // Use a QR code image
-            barcode.style.backgroundImage = `url(https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${value})`;
-            barcode.style.width = '100px';
-            barcode.style.height = '100px';
-            barcode.style.backgroundSize = 'contain';
-            barcode.style.backgroundRepeat = 'no-repeat';
-            console.log('Spawned QR code with value:', value);
-        } else {
-            // Use a barcode image with Code 128 format
-            barcode.style.backgroundImage = `url(https://bwipjs-api.metafloor.com/bcid?text=${value}&bcid=code128&scale=2&height=50&includetext=true)`;
-            barcode.style.width = '150px';
-            barcode.style.height = '50px';
-            barcode.style.backgroundSize = 'contain';
-            barcode.style.backgroundRepeat = 'no-repeat';
-            console.log('Spawned barcode with value:', value);
-        }
+        // Create barcode content
+        const barcodeContent = document.createElement('div');
+        barcodeContent.className = 'barcode-content';
+        barcodeContent.textContent = value;
+        barcodeContent.style.fontSize = '32px';
+        barcodeContent.style.fontFamily = 'monospace';
+        barcodeContent.style.fontWeight = 'bold';
+        barcodeContent.style.letterSpacing = '4px';
+        barcodeContent.style.marginBottom = '10px';
+        barcode.appendChild(barcodeContent);
+
+        // Create barcode bars
+        const barcodeImage = document.createElement('div');
+        barcodeImage.className = 'barcode-image';
+        barcodeImage.style.height = '80px';
+        barcodeImage.style.width = '200px';
+        barcodeImage.style.background = this.generateBarcodePattern(value);
+        barcode.appendChild(barcodeImage);
 
         barcode.dataset.value = value;
         gameArea.appendChild(barcode);
+        console.log('Spawned barcode with value:', value);
         console.log('Total barcodes in game area:', gameArea.getElementsByClassName('barcode').length);
 
         // Remove after delay
@@ -141,22 +125,59 @@ class Game {
         }, Math.max(3000 - (this.round * 200), 1000));
     }
 
+    generateBarcodePattern(value) {
+        // Create a simple barcode-like pattern
+        let pattern = 'linear-gradient(90deg,';
+        const chars = value.split('');
+        let position = 0;
+
+        // Start pattern (black bar)
+        pattern += `black 0%, black 2%,`;
+        position = 2;
+
+        // Generate pattern for each number
+        chars.forEach((char, index) => {
+            const num = parseInt(char);
+            // Each number gets 20% of the width (excluding start/end patterns)
+            const segmentWidth = 20;
+            const start = position;
+            
+            // Create varying bar widths based on the number
+            for (let i = 0; i < 4; i++) {
+                const isBar = ((num + i) % 2) === 0;
+                const barWidth = 5; // Each bar/space is 5% wide
+                pattern += `${isBar ? 'black' : 'white'} ${start + (i * barWidth)}%, `;
+                pattern += `${isBar ? 'black' : 'white'} ${start + ((i + 1) * barWidth)}%${i < 3 || index < chars.length - 1 ? ',' : ''}`;
+            }
+            position += segmentWidth;
+        });
+
+        // End pattern (black bar)
+        pattern += `, black 98%, black 100%)`;
+        return pattern;
+    }
+
     getRandomPosition(gameArea) {
         const areaRect = gameArea.getBoundingClientRect();
         const maxTries = 50;
         let tries = 0;
         
+        // Updated dimensions to match our new barcode size plus padding
+        const barcodeWidth = 260; // 220px min-width + 40px padding
+        const barcodeHeight = 200; // Approximate height including padding
+        const margin = 20; // Extra margin between barcodes
+        
         while (tries < maxTries) {
-            const left = Math.random() * (areaRect.width - 150);
-            const top = Math.random() * (areaRect.height - 100);
+            const left = Math.random() * (areaRect.width - barcodeWidth);
+            const top = Math.random() * (areaRect.height - barcodeHeight);
             
             // Check for overlap with existing barcodes
             const overlap = Array.from(gameArea.getElementsByClassName('barcode')).some(existing => {
                 const rect1 = {
-                    left: left,
-                    right: left + 150,
-                    top: top,
-                    bottom: top + 100
+                    left: left - margin,
+                    right: left + barcodeWidth + margin,
+                    top: top - margin,
+                    bottom: top + barcodeHeight + margin
                 };
                 const rect2 = existing.getBoundingClientRect();
                 
@@ -173,7 +194,17 @@ class Game {
             tries++;
         }
         
-        // If we couldn't find a non-overlapping position, return null
+        // If we couldn't find a non-overlapping position after maxTries,
+        // try to find any position with minimal overlap
+        if (tries === maxTries) {
+            const barcodes = Array.from(gameArea.getElementsByClassName('barcode'));
+            if (barcodes.length < 5) { // Only if we have few barcodes
+                const left = Math.random() * (areaRect.width - barcodeWidth);
+                const top = Math.random() * (areaRect.height - barcodeHeight);
+                return { left, top };
+            }
+        }
+        
         return null;
     }
 
