@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Whack-a-Barcode</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 </head>
 <body>
     <div class="game-container">
@@ -13,8 +14,14 @@
             <p class="instructions">Use your USB barcode scanner to scan the codes before they disappear!</p>
             <button id="startGame">Start Game</button>
             <div class="settings">
-                <label for="gameLength">Game Length (seconds):</label>
-                <input type="number" id="gameLength" value="120" min="30" max="300">
+                <div class="setting-item">
+                    <label for="roundLength">Round Length (seconds):</label>
+                    <input type="number" id="roundLength" value="120" min="30" max="300">
+                </div>
+                <div class="setting-item">
+                    <label for="totalRounds">Number of Rounds:</label>
+                    <input type="number" id="totalRounds" value="5" min="1" max="10">
+                </div>
             </div>
             <div class="high-scores">
                 <h2>High Scores</h2>
@@ -40,6 +47,11 @@
                 <p>Accuracy: <span id="accuracyValue">0</span>%</p>
                 <p>Good Whacks: <span id="goodWhacks">0</span></p>
                 <p>Bad Whacks: <span id="badWhacks">0</span></p>
+                <div class="bonus-stats">
+                    <h3>Bonus Round</h3>
+                    <p>QR Codes Scanned: <span id="bonusScanned">0</span>/<span id="bonusTotal">5</span></p>
+                    <p>Score Multiplier: <span id="multiplier">1x</span></p>
+                </div>
                 <p class="stats-message" id="statsMessage"></p>
             </div>
             <button id="nextRound">Next Round</button>

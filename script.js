@@ -2,8 +2,9 @@ class Game {
     constructor() {
         this.score = 0;
         this.round = 1;
-        this.gameLength = 120;
-        this.timeRemaining = this.gameLength;
+        this.totalRounds = 5; // Default total rounds
+        this.roundLength = 120; // Default round length in seconds
+        this.timeRemaining = this.roundLength;
         this.goodWhacks = 0;
         this.badWhacks = 0;
         this.isPlaying = false;
@@ -11,8 +12,30 @@ class Game {
         this.timerInterval = null;
         this.scanner = null;
         this.currentBarcode = '';
+        this.bonusLength = 20; // 20 seconds bonus round
+        this.bonusActive = false;
+        this.bonusCodesTotal = 5; // Number of bonus QR codes
+        this.bonusCodesScanned = 0;
+        this.roundMultiplier = 1;
+        this.isPaused = false;
+        this.PAUSE_BARCODE = 'PAUSE';  // Special value for pause/unpause
+        this.barcodeBuffer = '';  // Add this line
+        this.previousRoundScore = 0;  // Needed for bonus round calculations
+        this.gameArea = null;  // Store reference to game area
+        this.isGameOver = false;  // Explicit game over state
+        this.initializeGameArea();
         this.setupEventListeners();
+        this.setupScanner();
         this.loadHighScores();
+        this.setupPauseHandler();
+    }
+
+    initializeGameArea() {
+        this.gameArea = document.getElementById('gameArea');
+        if (!this.gameArea) {
+            console.error('Game area element not found!');
+            return;
+        }
     }
 
     setupEventListeners() {
@@ -20,109 +43,264 @@ class Game {
         document.getElementById('nextRound').addEventListener('click', () => this.startNextRound());
         document.getElementById('saveScore').addEventListener('click', () => this.saveHighScore());
         document.getElementById('playAgain').addEventListener('click', () => this.resetGame());
-        document.getElementById('gameLength').addEventListener('change', (e) => {
-            this.gameLength = parseInt(e.target.value);
-            this.timeRemaining = this.gameLength;
+        
+        // Modified to handle both round length and total rounds
+        document.getElementById('roundLength').addEventListener('change', (e) => {
+            this.roundLength = parseInt(e.target.value);
+            this.timeRemaining = this.roundLength;
             document.getElementById('timerValue').textContent = this.timeRemaining;
+        });
+        
+        document.getElementById('totalRounds').addEventListener('change', (e) => {
+            this.totalRounds = parseInt(e.target.value);
         });
     }
 
-    startGame() {
-        this.isPlaying = true;
-        document.getElementById('menuScreen').classList.add('hidden');
-        document.getElementById('gameScreen').classList.remove('hidden');
-        this.setupScanner();
-        this.startRound();
-    }
-
-    setupScanner() {
-        // Remove camera scanner, only use keyboard input for USB scanner
-        document.addEventListener('keypress', (e) => {
-            console.log('Key pressed:', e.key, 'Current barcode buffer:', this.currentBarcode);
-            if (e.key === 'Enter' && this.currentBarcode) {
-                console.log('Processing complete barcode:', this.currentBarcode);
-                this.onScan(this.currentBarcode);
-                this.currentBarcode = '';
-            } else {
-                this.currentBarcode = (this.currentBarcode || '') + e.key;
+    setupPauseHandler() {
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.isPlaying) {
+                this.togglePause();
             }
         });
     }
 
+    togglePause() {
+        this.isPaused = !this.isPaused;
+        
+        if (this.isPaused) {
+            // Pause the game
+            clearInterval(this.timerInterval);
+            clearInterval(this.barcodeInterval);
+            
+            // Show pause screen with scannable barcode
+            const pauseScreen = document.createElement('div');
+            pauseScreen.id = 'pauseScreen';
+            pauseScreen.className = 'pause-screen';
+            pauseScreen.innerHTML = `
+                <div class="pause-content">
+                    <h2>Game Paused</h2>
+                    <p>Press ESC or scan below to resume</p>
+                    <div class="resume-barcode">
+                        <div class="barcode-content">
+                            <div style="font-size: 32px; font-family: monospace; font-weight: bold; letter-spacing: 4px; margin-bottom: 10px;">
+                                ${this.PAUSE_BARCODE}
+                            </div>
+                            <svg class="barcode-image"
+                                jsbarcode-format="code128"
+                                jsbarcode-value="${this.PAUSE_BARCODE}"
+                                jsbarcode-width="2"
+                                jsbarcode-height="80"
+                                jsbarcode-fontSize="16"
+                                jsbarcode-margin="10">
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.querySelector('.game-container').appendChild(pauseScreen);
+            
+            // Generate the actual barcode
+            JsBarcode(pauseScreen.querySelector('.barcode-image'), this.PAUSE_BARCODE, {
+                format: "code128",
+                width: 2,
+                height: 80,
+                fontSize: 16,
+                margin: 10
+            });
+        } else {
+            this.unpauseGame();
+        }
+    }
+
+    unpauseGame() {
+        // Resume the game
+        this.startTimer();
+        this.generateBarcodes();
+        
+        // Remove pause screen
+        const pauseScreen = document.getElementById('pauseScreen');
+        if (pauseScreen) {
+            pauseScreen.remove();
+        }
+    }
+
+    startGame() {
+        if (this.isGameOver) {
+            this.resetGame();
+        }
+        
+        this.isPlaying = true;
+        this.isGameOver = false;
+        this.score = 0;
+        this.round = 1;
+        this.previousRoundScore = 0;
+        
+        document.getElementById('menuScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.remove('hidden');
+        
+        this.startRound();
+    }
+
+    setupScanner() {
+        let scanBuffer = '';
+        let scanTimeout = null;
+
+        document.addEventListener('keypress', (e) => {
+            // Add character to buffer
+            scanBuffer += e.key;
+            console.log('Scan buffer:', scanBuffer);  // Debug log
+            
+            // Clear existing timeout
+            if (scanTimeout) {
+                clearTimeout(scanTimeout);
+            }
+
+            // Set new timeout to process buffer
+            scanTimeout = setTimeout(() => {
+                if (scanBuffer) {
+                    // Remove any trailing newlines/enters
+                    const cleanCode = scanBuffer.replace(/[\r\n]/g, '');
+                    console.log('Processing scan:', cleanCode);
+                    this.processBarcode(cleanCode);
+                    scanBuffer = '';
+                }
+            }, 50); // 50ms timeout
+
+            // Also process immediately if Enter is pressed
+            if (e.key === 'Enter' && scanBuffer) {
+                clearTimeout(scanTimeout);
+                const cleanCode = scanBuffer.replace(/[\r\n]/g, '');
+                console.log('Processing scan (Enter):', cleanCode);
+                this.processBarcode(cleanCode);
+                scanBuffer = '';
+            }
+        });
+    }
+
+    processBarcode(code) {
+        if (!this.isPlaying) return;  // Only process if game is active
+        
+        console.log('Processing barcode:', code);  // Debug log
+
+        // Check for pause barcode
+        if (code === this.PAUSE_BARCODE) {
+            this.togglePause();
+            return;
+        }
+
+        if (this.bonusActive) {
+            // Handle bonus QR codes
+            const bonusQRs = document.getElementsByClassName('bonus-qr');
+            let found = false;
+            
+            for (const qr of bonusQRs) {
+                if (qr.dataset.value === code) {
+                    found = true;
+                    this.bonusCodesScanned++;
+                    qr.classList.add('scanned');
+                    setTimeout(() => qr.remove(), 500);
+                    break;
+                }
+            }
+
+            if (!found) {
+                console.log('Bonus QR not found:', code);
+            }
+        } else {
+            // Handle regular barcodes
+            const barcodes = document.getElementsByClassName('barcode');
+            let found = false;
+            
+            for (const barcode of barcodes) {
+                if (barcode.dataset.value === code) {
+                    found = true;
+                    const isBad = barcode.classList.contains('bad');
+                    
+                    if (isBad) {
+                        this.score = Math.max(0, this.score - 10);
+                        this.badWhacks++;
+                        barcode.classList.add('bad-scanned');
+                    } else {
+                        this.score += 10;
+                        this.goodWhacks++;
+                        barcode.classList.add('scanned');
+                    }
+                    
+                    setTimeout(() => barcode.remove(), 500);
+                    this.updateDisplay();
+                    break;
+                }
+            }
+
+            if (!found) {
+                console.log('Barcode not found:', code);
+            }
+        }
+    }
+
     startRound() {
+        // Store score before round starts for bonus calculations
+        this.previousRoundScore = this.score;
+        
+        // Reset round-specific counters
+        this.goodWhacks = 0;
+        this.badWhacks = 0;
+        this.timeRemaining = this.roundLength;
+        
         this.updateDisplay();
         this.startTimer();
         this.generateBarcodes();
     }
 
     generateBarcodes() {
+        if (this.barcodeInterval) {
+            clearInterval(this.barcodeInterval);
+        }
+        
+        // Increase difficulty with each round
         const spawnInterval = Math.max(2000 - (this.round * 200), 500);
+        const maxBarcodes = Math.min(5 + this.round, 8);  // Increase max barcodes with rounds
+        
         this.barcodeInterval = setInterval(() => {
-            if (this.isPlaying) {
+            if (!this.isPlaying || this.isPaused) return;
+            
+            const currentBarcodes = this.gameArea.getElementsByClassName('barcode').length;
+            if (currentBarcodes < maxBarcodes) {
                 this.spawnBarcode();
             }
         }, spawnInterval);
     }
 
     spawnBarcode() {
-        const gameArea = document.getElementById('gameArea');
-        
-        // Don't spawn if we already have too many barcodes
-        if (gameArea.getElementsByClassName('barcode').length >= 8) {
-            return;
-        }
-
         const barcode = document.createElement('div');
         barcode.className = 'barcode';
         
-        // Randomly decide if this is a bad barcode (20% chance)
-        const isBad = Math.random() < 0.2;
-        if (isBad) barcode.classList.add('bad');
-
-        // Generate random position (ensuring no overlap)
-        const position = this.getRandomPosition(gameArea);
-        if (!position) {
-            console.log('Could not find non-overlapping position, skipping barcode spawn');
-            return;
-        }
-
+        // Get non-overlapping position
+        const position = this.getRandomPosition(this.gameArea);
+        if (!position) return;
+        
         barcode.style.left = position.left + 'px';
         barcode.style.top = position.top + 'px';
-
-        // Create a simple 4-digit number for easier scanning
-        const value = Math.floor(Math.random() * 9000 + 1000).toString(); // 4-digit number between 1000-9999
         
-        // Create barcode content
-        const barcodeContent = document.createElement('div');
-        barcodeContent.className = 'barcode-content';
-        barcodeContent.textContent = value;
-        barcodeContent.style.fontSize = '32px';
-        barcodeContent.style.fontFamily = 'monospace';
-        barcodeContent.style.fontWeight = 'bold';
-        barcodeContent.style.letterSpacing = '4px';
-        barcodeContent.style.marginBottom = '10px';
-        barcode.appendChild(barcodeContent);
+        // Increase bad barcode probability with each round
+        const badProbability = Math.min(0.2 + (this.round * 0.05), 0.4);
+        const isBad = Math.random() < badProbability;
+        if (isBad) barcode.classList.add('bad');
 
-        // Create barcode bars
-        const barcodeImage = document.createElement('div');
-        barcodeImage.className = 'barcode-image';
-        barcodeImage.style.height = '80px';
-        barcodeImage.style.width = '200px';
-        barcodeImage.style.background = this.generateBarcodePattern(value);
-        barcode.appendChild(barcodeImage);
-
+        // Set unique value and add timeout
+        const value = Math.floor(Math.random() * 9000 + 1000).toString();
         barcode.dataset.value = value;
-        gameArea.appendChild(barcode);
-        console.log('Spawned barcode with value:', value);
-        console.log('Total barcodes in game area:', gameArea.getElementsByClassName('barcode').length);
-
-        // Remove after delay
+        
+        // Add timeout to remove unscanned barcodes
+        const timeout = Math.max(5000 - (this.round * 300), 2000);
         setTimeout(() => {
             if (barcode.parentNode) {
-                barcode.remove();
                 console.log('Removed barcode due to timeout:', value);
+                barcode.remove();
             }
-        }, Math.max(3000 - (this.round * 200), 1000));
+        }, timeout);
+
+        this.gameArea.appendChild(barcode);
     }
 
     generateBarcodePattern(value) {
@@ -138,53 +316,49 @@ class Game {
         // Generate pattern for each number
         chars.forEach((char, index) => {
             const num = parseInt(char);
-            // Each number gets 20% of the width (excluding start/end patterns)
-            const segmentWidth = 20;
-            const start = position;
+            // Width of each bar is based on the number (1-9)
+            const width = (num + 1) * 2;
             
-            // Create varying bar widths based on the number
-            for (let i = 0; i < 4; i++) {
-                const isBar = ((num + i) % 2) === 0;
-                const barWidth = 5; // Each bar/space is 5% wide
-                pattern += `${isBar ? 'black' : 'white'} ${start + (i * barWidth)}%, `;
-                pattern += `${isBar ? 'black' : 'white'} ${start + ((i + 1) * barWidth)}%${i < 3 || index < chars.length - 1 ? ',' : ''}`;
-            }
-            position += segmentWidth;
+            // Add white space
+            pattern += `white ${position}%, white ${position + 2}%,`;
+            position += 2;
+            
+            // Add black bar
+            pattern += `black ${position}%, black ${position + width}%,`;
+            position += width;
         });
 
         // End pattern (black bar)
-        pattern += `, black 98%, black 100%)`;
-        return pattern;
+        pattern += `white ${position}%, white ${position + 2}%,`;
+        position += 2;
+        pattern += `black ${position}%, black ${position + 2}%`;
+
+        return pattern + ')';
     }
 
     getRandomPosition(gameArea) {
         const areaRect = gameArea.getBoundingClientRect();
-        const maxTries = 50;
+        const maxTries = 100; // Increased from 50 to ensure finding a spot
         let tries = 0;
         
-        // Updated dimensions to match our new barcode size plus padding
-        const barcodeWidth = 260; // 220px min-width + 40px padding
-        const barcodeHeight = 200; // Approximate height including padding
-        const margin = 20; // Extra margin between barcodes
+        const barcodeWidth = 260;
+        const barcodeHeight = 200;
+        const margin = 20;
         
         while (tries < maxTries) {
             const left = Math.random() * (areaRect.width - barcodeWidth);
             const top = Math.random() * (areaRect.height - barcodeHeight);
             
-            // Check for overlap with existing barcodes
-            const overlap = Array.from(gameArea.getElementsByClassName('barcode')).some(existing => {
-                const rect1 = {
-                    left: left - margin,
-                    right: left + barcodeWidth + margin,
-                    top: top - margin,
-                    bottom: top + barcodeHeight + margin
-                };
-                const rect2 = existing.getBoundingClientRect();
+            // Check for overlap with ALL existing elements (both barcodes and bonus QRs)
+            const overlap = Array.from(gameArea.children).some(existing => {
+                const rect = existing.getBoundingClientRect();
+                const existingLeft = rect.left - areaRect.left;
+                const existingTop = rect.top - areaRect.top;
                 
-                return !(rect1.left > rect2.right || 
-                        rect1.right < rect2.left || 
-                        rect1.top > rect2.bottom ||
-                        rect1.bottom < rect2.top);
+                return !(left + barcodeWidth + margin < existingLeft || 
+                        left > existingLeft + rect.width + margin || 
+                        top + barcodeHeight + margin < existingTop || 
+                        top > existingTop + rect.height + margin);
             });
             
             if (!overlap) {
@@ -194,68 +368,212 @@ class Game {
             tries++;
         }
         
-        // If we couldn't find a non-overlapping position after maxTries,
-        // try to find any position with minimal overlap
-        if (tries === maxTries) {
-            const barcodes = Array.from(gameArea.getElementsByClassName('barcode'));
-            if (barcodes.length < 5) { // Only if we have few barcodes
-                const left = Math.random() * (areaRect.width - barcodeWidth);
-                const top = Math.random() * (areaRect.height - barcodeHeight);
-                return { left, top };
-            }
-        }
-        
+        // If we couldn't find a spot after maxTries, return null
+        // This will prevent spawning instead of allowing overlap
         return null;
     }
 
-    onScan(decodedText) {
-        console.log('Scanned value:', decodedText);
-        const barcodes = document.getElementsByClassName('barcode');
-        console.log('Looking for match among', barcodes.length, 'barcodes');
-        
-        for (const barcode of barcodes) {
-            console.log('Comparing with barcode value:', barcode.dataset.value);
-            if (barcode.dataset.value === decodedText) {
-                console.log('Match found!');
-                const isBad = barcode.classList.contains('bad');
-                if (isBad) {
-                    this.score = Math.max(0, this.score - 10);
-                    this.badWhacks++;
-                    barcode.classList.add('bad-scanned');
-                    console.log('Bad barcode scanned, new score:', this.score);
-                } else {
-                    this.score += 10;
-                    this.goodWhacks++;
-                    barcode.classList.add('scanned');
-                    console.log('Good barcode scanned, new score:', this.score);
-                }
-                setTimeout(() => barcode.remove(), 500);
-                this.updateDisplay();
-                break;
-            }
-        }
-    }
-
     startTimer() {
+        // Clear any existing interval
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+        }
+        
         this.timerInterval = setInterval(() => {
-            this.timeRemaining--;
-            document.getElementById('timerValue').textContent = this.timeRemaining;
-            
-            if (this.timeRemaining <= 0) {
-                this.endGame();
+            if (!this.isPaused) {  // Only countdown if not paused
+                this.timeRemaining--;
+                document.getElementById('timerValue').textContent = this.timeRemaining;
+                
+                if (this.timeRemaining <= 0) {
+                    if (this.round >= this.totalRounds) {
+                        this.endGame();
+                    } else {
+                        this.endRound();
+                    }
+                }
             }
         }, 1000);
     }
 
-    endGame() {
-        this.isPlaying = false;
+    endRound() {
         clearInterval(this.timerInterval);
         clearInterval(this.barcodeInterval);
         
-        if (this.scanner) {
-            this.scanner.stop();
+        // Clear regular barcodes
+        const gameArea = document.getElementById('gameArea');
+        while (gameArea.firstChild) {
+            gameArea.removeChild(gameArea.firstChild);
         }
 
+        // Start bonus round
+        this.startBonusRound();
+    }
+
+    startBonusRound() {
+        this.bonusActive = true;
+        this.bonusCodesScanned = 0;
+        this.timeRemaining = this.bonusLength;
+        
+        // Clear any remaining regular barcodes
+        while (this.gameArea.firstChild) {
+            this.gameArea.removeChild(this.gameArea.firstChild);
+        }
+        
+        // Spawn bonus QR codes
+        for (let i = 0; i < this.bonusCodesTotal; i++) {
+            this.spawnBonusQR();
+        }
+
+        // Start bonus timer
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+        }
+        
+        this.timerInterval = setInterval(() => {
+            if (this.isPaused) return;
+            
+            this.timeRemaining--;
+            document.getElementById('timerValue').textContent = this.timeRemaining;
+            
+            if (this.timeRemaining <= 0 || this.bonusCodesScanned === this.bonusCodesTotal) {
+                this.endBonusRound();
+            }
+        }, 1000);
+    }
+
+    spawnBonusQR() {
+        const gameArea = document.getElementById('gameArea');
+        const qrCode = document.createElement('div');
+        qrCode.className = 'barcode bonus-qr';
+        
+        // Generate random position
+        const position = this.getRandomPosition(gameArea);
+        qrCode.style.left = position.left + 'px';
+        qrCode.style.top = position.top + 'px';
+
+        // Random initial velocity (3x faster: 6-12 pixels per frame)
+        qrCode.dataset.velocityX = (Math.random() * 6 + 6) * (Math.random() < 0.5 ? -1 : 1) + 'px';
+        qrCode.dataset.velocityY = (Math.random() * 6 + 6) * (Math.random() < 0.5 ? -1 : 1) + 'px';
+
+        // Set dimensions for collision detection
+        qrCode.dataset.width = '260';  // Match the barcode width
+        qrCode.dataset.height = '200'; // Match the barcode height
+
+        // Create QR code content
+        const value = Math.floor(Math.random() * 9000 + 1000).toString();
+        qrCode.dataset.value = value;
+        
+        const qrContent = document.createElement('div');
+        qrContent.className = 'barcode-content';
+        qrContent.innerHTML = `
+            <div class="barcode-image" style="${this.generateBarcodePattern(value)}"></div>
+            <div class="barcode-text">${value}</div>
+        `;
+        
+        qrCode.appendChild(qrContent);
+        gameArea.appendChild(qrCode);
+
+        this.animateQR(qrCode);
+    }
+
+    animateQR(qrCode) {
+        const gameArea = document.getElementById('gameArea');
+        const gameAreaRect = gameArea.getBoundingClientRect();
+
+        const animate = () => {
+            if (!this.bonusActive || !qrCode.parentNode) return;
+
+            const rect = qrCode.getBoundingClientRect();
+            let velocityX = parseFloat(qrCode.dataset.velocityX);
+            let velocityY = parseFloat(qrCode.dataset.velocityY);
+            
+            let left = rect.left - gameAreaRect.left;
+            let top = rect.top - gameAreaRect.top;
+
+            // Check collision with other QR codes
+            const otherQRs = Array.from(gameArea.getElementsByClassName('bonus-qr'))
+                .filter(other => other !== qrCode);
+
+            for (const other of otherQRs) {
+                const otherRect = other.getBoundingClientRect();
+                const otherLeft = otherRect.left - gameAreaRect.left;
+                const otherTop = otherRect.top - gameAreaRect.top;
+
+                // Check for collision
+                if (!(left + rect.width < otherLeft || 
+                      left > otherLeft + otherRect.width || 
+                      top + rect.height < otherTop || 
+                      top > otherTop + otherRect.height)) {
+                    
+                    // Collision detected - swap velocities
+                    const otherVX = parseFloat(other.dataset.velocityX);
+                    const otherVY = parseFloat(other.dataset.velocityY);
+                    
+                    qrCode.dataset.velocityX = otherVX;
+                    qrCode.dataset.velocityY = otherVY;
+                    other.dataset.velocityX = velocityX;
+                    other.dataset.velocityY = velocityY;
+                    
+                    // Add a small random adjustment to prevent sticking
+                    velocityX = otherVX + (Math.random() - 0.5);
+                    velocityY = otherVY + (Math.random() - 0.5);
+                }
+            }
+
+            // Bounce off edges
+            if (left <= 0 || left + rect.width >= gameAreaRect.width) {
+                velocityX *= -1;
+                qrCode.dataset.velocityX = velocityX;
+            }
+            if (top <= 0 || top + rect.height >= gameAreaRect.height) {
+                velocityY *= -1;
+                qrCode.dataset.velocityY = velocityY;
+            }
+
+            qrCode.style.left = (left + velocityX) + 'px';
+            qrCode.style.top = (top + velocityY) + 'px';
+
+            requestAnimationFrame(animate);
+        };
+
+        requestAnimationFrame(animate);
+    }
+
+    endBonusRound() {
+        this.bonusActive = false;
+        clearInterval(this.timerInterval);
+        
+        // Calculate and apply bonus
+        this.roundMultiplier = this.bonusCodesScanned === this.bonusCodesTotal ? 2 : 1;
+        const roundScore = this.score - this.previousRoundScore;
+        this.score = this.previousRoundScore + (roundScore * this.roundMultiplier);
+        
+        // Clear bonus QR codes
+        while (this.gameArea.firstChild) {
+            this.gameArea.removeChild(this.gameArea.firstChild);
+        }
+
+        if (this.round >= this.totalRounds) {
+            this.endGame();
+        } else {
+            this.showRoundStats();
+        }
+    }
+
+    endGame() {
+        this.isPlaying = false;
+        this.isGameOver = true;
+        
+        // Clear all intervals
+        clearInterval(this.timerInterval);
+        clearInterval(this.barcodeInterval);
+        
+        // Clear game area
+        while (this.gameArea.firstChild) {
+            this.gameArea.removeChild(this.gameArea.firstChild);
+        }
+        
+        // Update display
         document.getElementById('gameScreen').classList.add('hidden');
         document.getElementById('gameOver').classList.remove('hidden');
         document.getElementById('finalScore').textContent = this.score;
@@ -263,6 +581,10 @@ class Game {
 
     startNextRound() {
         this.round++;
+        this.timeRemaining = this.roundLength;
+        this.goodWhacks = 0;
+        this.badWhacks = 0;
+        
         document.getElementById('roundStats').classList.add('hidden');
         document.getElementById('gameScreen').classList.remove('hidden');
         this.startRound();
@@ -273,6 +595,11 @@ class Game {
         document.getElementById('accuracyValue').textContent = accuracy;
         document.getElementById('goodWhacks').textContent = this.goodWhacks;
         document.getElementById('badWhacks').textContent = this.badWhacks;
+        
+        // Add bonus round stats
+        document.getElementById('bonusScanned').textContent = this.bonusCodesScanned;
+        document.getElementById('bonusTotal').textContent = this.bonusCodesTotal;
+        document.getElementById('multiplier').textContent = this.roundMultiplier + 'x';
 
         let message = '';
         if (accuracy >= 90) message = "Fantastic!";
@@ -317,20 +644,34 @@ class Game {
     }
 
     resetGame() {
+        // Reset all game state
         this.score = 0;
         this.round = 1;
-        this.timeRemaining = this.gameLength;
+        this.timeRemaining = this.roundLength;
         this.goodWhacks = 0;
         this.badWhacks = 0;
+        this.previousRoundScore = 0;
+        this.bonusActive = false;
+        this.bonusCodesScanned = 0;
+        this.isPlaying = false;
+        this.isGameOver = false;
+        this.isPaused = false;
         
+        // Clear intervals
+        clearInterval(this.timerInterval);
+        clearInterval(this.barcodeInterval);
+        
+        // Reset UI
         document.getElementById('gameOver').classList.add('hidden');
+        document.getElementById('roundStats').classList.add('hidden');
         document.getElementById('menuScreen').classList.remove('hidden');
+        
         this.updateDisplay();
     }
 
     updateDisplay() {
         document.getElementById('scoreValue').textContent = this.score;
-        document.getElementById('roundValue').textContent = this.round;
+        document.getElementById('roundValue').textContent = `${this.round}/${this.totalRounds}`;
         document.getElementById('timerValue').textContent = this.timeRemaining;
     }
 }
