@@ -287,20 +287,62 @@ class Game {
         const isBad = Math.random() < badProbability;
         if (isBad) barcode.classList.add('bad');
 
-        // Set unique value and add timeout
+        // Generate unique value
         const value = Math.floor(Math.random() * 9000 + 1000).toString();
         barcode.dataset.value = value;
+
+        // Create barcode content container
+        const barcodeContent = document.createElement('div');
+        barcodeContent.className = 'barcode-content';
+
+        // Create SVG element directly with namespace
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "barcode-image");
         
+        // Create text display
+        const textDisplay = document.createElement('div');
+        textDisplay.className = 'barcode-text';
+        textDisplay.textContent = value;
+
+        // Add elements to the container
+        barcodeContent.appendChild(svg);
+        barcodeContent.appendChild(textDisplay);
+        barcode.appendChild(barcodeContent);
+        
+        // Add to game area
+        this.gameArea.appendChild(barcode);
+
+        // Generate the actual barcode
+        try {
+            // First verify JsBarcode is loaded
+            if (typeof JsBarcode === 'undefined') {
+                throw new Error('JsBarcode library not loaded');
+            }
+
+            JsBarcode(svg, value, {
+                format: "code128",
+                width: 2,
+                height: 80,
+                displayValue: false,
+                margin: 10,
+                background: "transparent"
+            });
+        } catch (error) {
+            console.error('Failed to generate barcode:', error);
+            // Fallback to pattern if barcode generation fails
+            const patternDiv = document.createElement('div');
+            patternDiv.className = 'barcode-image';
+            patternDiv.style.background = this.generateBarcodePattern(value);
+            svg.replaceWith(patternDiv);
+        }
+
         // Add timeout to remove unscanned barcodes
         const timeout = Math.max(5000 - (this.round * 300), 2000);
         setTimeout(() => {
             if (barcode.parentNode) {
-                console.log('Removed barcode due to timeout:', value);
                 barcode.remove();
             }
         }, timeout);
-
-        this.gameArea.appendChild(barcode);
     }
 
     generateBarcodePattern(value) {
